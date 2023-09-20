@@ -34,6 +34,9 @@ ZhUyU1997, and Zou Chang Wei.
 The code in the files that constitute xv6 is
 Copyright 2006-2022 Frans Kaashoek, Robert Morris, and Russ Cox.
 
+Localization, patches and tests are
+Copyright 2020-2023 ITMO University, Nikita Sychev, Nikolay Akimov
+
 ERROR REPORTS
 
 Please send errors and suggestions to Frans Kaashoek and Robert Morris

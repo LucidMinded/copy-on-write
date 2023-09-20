@@ -11,15 +11,10 @@ entryother
 initcode
 initcode.out
 kernelmemfs
-mkfs
+mkfs/mkfs
 kernel/kernel
 user/usys.S
 .gdbinit
-*.zip
 xv6.out*
-.vagrant/
-submissions/
-ph
-barrier
-/lab-*.json
+/.cache
 .DS_Store
