@@ -1,7 +1,8 @@
 from __future__ import print_function
 
 import sys, os, re, time, socket, select, subprocess, errno, shutil, random, string, json
-from subprocess import check_call, Popen
+from subprocess import Popen
+from typing import Any, Callable, Optional
 from optparse import OptionParser
 
 __all__ = []
@@ -18,75 +19,96 @@ PART_TOTAL = PART_POSSIBLE = 0
 CURRENT_TEST = None
 GRADES = {}
 
-def test(points, title=None, parent=None):
+class Test:
+    __name__: str
+    parent: Optional["Test"]
+    fn: Callable[[], None]
+    points: int
+    title: str
+    complete: bool
+    ok: bool
+    finish: list[Callable[[str | None], None]]
+
+    def __init__(self, fn: Callable[[], None], points: int, title: str | None = None, parent: Optional["Test"] = None):
+        self.__name__ = fn.__name__
+        self.points = points
+
+        if title:
+            self.title = title
+        else:
+            assert fn.__name__.startswith("test_")
+            self.title = fn.__name__[5:].replace("_", " ")
+
+        if parent:
+            self.title = "  " + self.title
+            self.parent = parent
+        else:
+            self.parent = None
+
+        self.fn = fn
+        self.complete = False
+        self.ok = False
+        self.on_finish = []
+        TESTS.append(self)
+
+    def __call__(self) -> bool:
+        global TOTAL, POSSIBLE, CURRENT_TEST, GRADES
+
+        # Handle test dependencies
+        if self.complete:
+            return self.ok
+        self.complete = True
+        parent_failed = False
+        if self.parent:
+            parent_failed = not self.parent()
+
+        # Run the test
+        fail = None
+        start = time.time()
+        CURRENT_TEST = self
+        sys.stdout.write("== Test %s == " % self.title)
+        if self.parent:
+            sys.stdout.write("\n")
+        sys.stdout.flush()
+        try:
+            if parent_failed and self.parent:
+                raise AssertionError('Parent failed: %s' % self.parent.__name__)
+            self.fn()
+        except AssertionError as e:
+            fail = str(e)
+
+        # Display and handle test result
+        POSSIBLE += self.points
+        if self.points:
+            print("%s: %s" % (self.title, \
+                (color("red", "FAIL") if fail else color("green", "OK"))), end=' ')
+        if time.time() - start > 0.1:
+            print("(%.1fs)" % (time.time() - start), end=' ')
+        print()
+        if fail:
+            print("    %s" % fail.replace("\n", "\n    "))
+        else:
+            TOTAL += self.points
+        if self.points:
+            GRADES[self.title] = 0 if fail else self.points
+
+        for callback in self.on_finish:
+            callback(fail)
+        CURRENT_TEST = None
+
+        self.ok = not fail
+        return self.ok
+
+
+def test(points, title: str | None = None, parent: Test | None = None):
     """Decorator for declaring test functions.  If title is None, the
     title of the test will be derived from the function name by
     stripping the leading "test_" and replacing underscores with
     spaces."""
 
-    def register_test(fn, title=title):
-        if not title:
-            assert fn.__name__.startswith("test_")
-            title = fn.__name__[5:].replace("_", " ")
-        if parent:
-            title = "  " + title
+    def register_test(fn: Callable, title: str | None = title) -> Test:
+        return Test(fn, points, title, parent)
 
-        def run_test():
-            global TOTAL, POSSIBLE, CURRENT_TEST, GRADES
-
-            # Handle test dependencies
-            if run_test.complete:
-                return run_test.ok
-            run_test.complete = True
-            parent_failed = False
-            if parent:
-                parent_failed = not parent()
-
-            # Run the test
-            fail = None
-            start = time.time()
-            CURRENT_TEST = run_test
-            sys.stdout.write("== Test %s == " % title)
-            if parent:
-                sys.stdout.write("\n")
-            sys.stdout.flush()
-            try:
-                if parent_failed:
-                    raise AssertionError('Parent failed: %s' % parent.__name__)
-                fn()
-            except AssertionError as e:
-                fail = str(e)
-
-            # Display and handle test result
-            POSSIBLE += points
-            if points:
-                print("%s: %s" % (title, \
-                    (color("red", "FAIL") if fail else color("green", "OK"))), end=' ')
-            if time.time() - start > 0.1:
-                print("(%.1fs)" % (time.time() - start), end=' ')
-            print()
-            if fail:
-                print("    %s" % fail.replace("\n", "\n    "))
-            else:
-                TOTAL += points
-            if points:
-                GRADES[title] = 0 if fail else points
-
-            for callback in run_test.on_finish:
-                callback(fail)
-            CURRENT_TEST = None
-
-            run_test.ok = not fail
-            return run_test.ok
-
-        # Record test metadata on the test wrapper function
-        run_test.__name__ = fn.__name__
-        run_test.title = title
-        run_test.complete = False
-        run_test.ok = False
-        run_test.on_finish = []
-        TESTS.append(run_test)
-        return run_test
     return register_test
 
 def end_part(name):
@@ -173,8 +195,8 @@ def assert_lines_match(text, *regexps, **kw):
 
     # Check text against regexps
     lines = text.splitlines()
-    good = set()
-    bad = set()
+    good: set[int] = set()
+    bad: set[int] = set()
     for i, line in enumerate(lines):
         if any(re.match(r, line) for r in regexps):
             good.add(i)
@@ -186,7 +208,7 @@ def assert_lines_match(text, *regexps, **kw):
         return
 
     # We failed; construct an informative failure message
-    show = set()
+    show: set[int] = set()
     for lineno in good.union(bad):
         for offset in range(-2, 3):
             show.add(lineno + offset)
@@ -334,9 +356,12 @@ QEMU appears to already be running.  Please exit it if possible or use
 
     def fileno(self):
         if self.proc:
+            assert self.proc.stdout
             return self.proc.stdout.fileno()
 
     def handle_read(self):
+        assert self.proc
+        assert self.proc.stdout
         buf = os.read(self.proc.stdout.fileno(), 4096)
         self.outbytes.extend(buf)
         self.output = self.outbytes.decode("utf-8", "replace")
@@ -347,6 +372,8 @@ QEMU appears to already be running.  Please exit it if possible or use
             return
 
     def write(self, buf):
+        assert self.proc
+        assert self.proc.stdin
         if isinstance(buf, str):
             buf = buf.encode('utf-8')
         self.proc.stdin.write(buf)
@@ -380,6 +407,7 @@ class GDBClient(object):
             return self.sock.fileno()
 
     def handle_read(self):
+        assert self.sock
         try:
             data = self.sock.recv(4096).decode("ascii", "replace")
         except socket.error:
@@ -402,10 +430,12 @@ class GDBClient(object):
                 raise TerminateTest
 
     def __send(self, cmd):
+        assert self.sock
         packet = "$%s#%02x" % (cmd, sum(map(ord, cmd)) % 256)
         self.sock.sendall(packet.encode("ascii"))
 
     def __send_break(self):
+        assert self.sock
         self.sock.sendall(b"\x03")
 
     def close(self):
