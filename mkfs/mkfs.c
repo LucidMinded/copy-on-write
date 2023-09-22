@@ -146,7 +146,7 @@ int main(int argc, char *argv[]) {
 
     bzero(&de, sizeof(de));
     de.inum = xshort(inum);
-    strncpy(de.name, shortname, DIRSIZ);
+    strncpy(de.name, shortname, DIRSIZ - 1);
     iappend(rootino, &de, sizeof(de));
 
     while ((cc = read(fd, buf, sizeof(buf))) > 0) iappend(inum, buf, cc);
