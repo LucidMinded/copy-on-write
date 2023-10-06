@@ -18,3 +18,4 @@ user/usys.S
 xv6.out*
 /.cache
 .DS_Store
+__pycache__
