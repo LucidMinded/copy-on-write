@@ -2870,17 +2870,19 @@ int countfree() {
   return n;
 }
 
-int drivetests(int quick, int continuous, char *justone) {
+int drivetests(int mode, int continuous, char *justone) {
   do {
     printf("usertests starting\n");
     int free0 = countfree();
     int free1 = 0;
-    if (runtests(quicktests, justone, continuous)) {
-      if (continuous != 2) {
-        return 1;
+    if ((mode & 1) == 1) {
+      if (runtests(quicktests, justone, continuous)) {
+        if (continuous != 2) {
+          return 1;
+        }
       }
     }
-    if (!quick) {
+    if ((mode & 2) == 2) {
       if (justone == 0) printf("usertests slow tests starting\n");
       if (runtests(slowtests, justone, continuous)) {
         if (continuous != 2) {
@@ -2900,22 +2902,24 @@ int drivetests(int quick, int continuous, char *justone) {
 
 int main(int argc, char *argv[]) {
   int continuous = 0;
-  int quick = 0;
+  int mode = 3;
   char *justone = 0;
 
   if (argc == 2 && strcmp(argv[1], "-q") == 0) {
-    quick = 1;
+    mode = 1;
   } else if (argc == 2 && strcmp(argv[1], "-c") == 0) {
     continuous = 1;
   } else if (argc == 2 && strcmp(argv[1], "-C") == 0) {
     continuous = 2;
+  } else if (argc == 2 && strcmp(argv[1], "-s") == 0) {
+    mode = 2;
   } else if (argc == 2 && argv[1][0] != '-') {
     justone = argv[1];
   } else if (argc > 1) {
-    printf("Usage: usertests [-c] [-C] [-q] [testname]\n");
+    printf("Usage: usertests [-c | -C | -q | -s] [testname]\n");
     exit(1);
   }
-  if (drivetests(quick, continuous, justone)) {
+  if (drivetests(mode, continuous, justone)) {
     exit(1);
   }
   printf("ALL TESTS PASSED\n");
