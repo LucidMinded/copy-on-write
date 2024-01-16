@@ -52,6 +52,10 @@ void usertrap(void) {
     intr_on();
 
     syscall();
+  } else if (r_scause() == 13 || r_scause() == 15) {
+    if (handleCOW(p->pagetable, PGROUNDDOWN(r_stval()))) {
+      setkilled(p);
+    }
   } else if ((which_dev = devintr()) != 0) {
     // ok
   } else {
@@ -66,6 +70,49 @@ void usertrap(void) {
   if (which_dev == 2) yield();
 
   usertrapret();
+}
+
+int handleCOW(pagetable_t pagetable, uint64 va) {
+  if (va >= MAXVA) {
+    return -1;
+  }
+  pte_t *pte = walk(pagetable, va, 0);
+  if (pte == 0) {
+    printf("usertrap(): walk() returns 0\n");
+    return -1;
+  }
+  if ((*pte & PTE_W)) {
+    return 0;
+  }
+  if ((*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 || (*pte & PTE_COW) == 0) {
+    printf("usertrap(): pte not valid or access denied\n");
+    return -1;
+  }
+
+  uint64 pa = PTE2PA(*pte);
+
+  if (get_ref_cnt(pa) == 1) {
+    *pte |= PTE_W;
+    *pte &= ~PTE_COW;
+    return 0;
+  }
+
+  uint64 flags = PTE_FLAGS(*pte);
+  flags |= PTE_W;
+  flags &= ~PTE_COW;
+  void *mem = kalloc();
+  if (mem == 0) {
+    return -1;
+  }
+
+  memmove(mem, (char *)pa, PGSIZE);
+  uvmunmap(pagetable, va, 1, 1);
+  if (mappages(pagetable, va, PGSIZE, (uint64)mem, flags) != 0) {
+    kfree(mem);
+    return -1;
+  }
+  //   kfree((void *)pa);
+  return 0;
 }
 
 //

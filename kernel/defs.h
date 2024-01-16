@@ -149,6 +149,8 @@ void trapinithart(void);
 extern struct spinlock tickslock;
 void usertrapret(void);
 
+int handleCOW(pagetable_t, uint64);
+
 // uart.c
 void uartinit(void);
 void uartintr(void);
@@ -174,6 +176,12 @@ uint64 walkaddr(pagetable_t, uint64);
 int copyout(pagetable_t, uint64, char *, uint64);
 int copyin(pagetable_t, char *, uint64, uint64);
 int copyinstr(pagetable_t, char *, uint64, uint64);
+void vmprint(pagetable_t);
+void inc_ref_cnt(uint64 pa);
+void dec_ref_cnt(uint64 pa);
+int get_ref_cnt(uint64 pa);
+void set_ref_cnt(uint64 pa, int value);
+void init_ref_cnt_lock();
 
 // plic.c
 void plicinit(void);

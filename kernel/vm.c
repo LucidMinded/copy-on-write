@@ -2,6 +2,7 @@
 #include "defs.h"
 #include "memlayout.h"
 #include "riscv.h"
+#include "spinlock.h"
 #include "types.h"
 
 /*
@@ -12,6 +13,45 @@ pagetable_t kernel_pagetable;
 extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[];  // trampoline.S
+
+struct {
+  int cnt[(PHYSTOP - KERNBASE) / PGSIZE + 1];
+  struct spinlock lock;
+} ref_cnt;
+
+uint64 index_ref_cnt(uint64 pa) { return (pa - KERNBASE) / PGSIZE; }
+
+void inc_ref_cnt(uint64 pa) {
+  acquire(&ref_cnt.lock);
+  ref_cnt.cnt[index_ref_cnt(pa)]++;
+  release(&ref_cnt.lock);
+}
+
+void dec_ref_cnt(uint64 pa) {
+  acquire(&ref_cnt.lock);
+  ref_cnt.cnt[index_ref_cnt(pa)]--;
+  release(&ref_cnt.lock);
+}
+
+int get_ref_cnt(uint64 pa) {
+  acquire(&ref_cnt.lock);
+  int cnt = ref_cnt.cnt[index_ref_cnt(pa)];
+  release(&ref_cnt.lock);
+  return cnt;
+}
+
+void set_ref_cnt(uint64 pa, int value) {
+  acquire(&ref_cnt.lock);
+  ref_cnt.cnt[index_ref_cnt(pa)] = value;
+  release(&ref_cnt.lock);
+}
+
+void init_ref_cnt_lock() {
+  initlock(&ref_cnt.lock, "ref_cnt_lock");
+  //   for (int i = 0; i <= index_ref_cnt(PHYSTOP); ++i) {
+  //     ref_cnt.cnt[i] = 1;
+  //   }
+}
 
 // Make a direct-map page table for the kernel.
 pagetable_t kvmmake(void) {
@@ -47,7 +87,14 @@ pagetable_t kvmmake(void) {
 }
 
 // Initialize the one kernel_pagetable
-void kvminit(void) { kernel_pagetable = kvmmake(); }
+void kvminit(void) {
+  kernel_pagetable = kvmmake();
+
+  //   initlock(&ref_cnt.lock, "ref_cnt");
+  //   for (int i = 0; i < (PHYSTOP - KERNBASE) / PGSIZE; ++i) {
+  //     ref_cnt.cnt[i] = 1;
+  //   }
+}
 
 // Switch h/w page table register to the kernel's page table,
 // and enable paging.
@@ -262,19 +309,22 @@ int uvmcopy(pagetable_t old, pagetable_t new, uint64 sz) {
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+  //   char *mem;
 
   for (i = 0; i < sz; i += PGSIZE) {
     if ((pte = walk(old, i, 0)) == 0) panic("uvmcopy: pte should exist");
     if ((*pte & PTE_V) == 0) panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
+    *pte &= ~PTE_W;
+    *pte |= PTE_COW;
     flags = PTE_FLAGS(*pte);
-    if ((mem = kalloc()) == 0) goto err;
-    memmove(mem, (char *)pa, PGSIZE);
-    if (mappages(new, i, PGSIZE, (uint64)mem, flags) != 0) {
-      kfree(mem);
+    // if ((mem = kalloc()) == 0) goto err;
+    // memmove(mem, (char *)pa, PGSIZE);
+    if (mappages(new, i, PGSIZE, (uint64)pa, flags) != 0) {
+      // kfree(mem);
       goto err;
     }
+    inc_ref_cnt(pa);
   }
   return 0;
 
@@ -303,6 +353,9 @@ int copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len) {
   while (len > 0) {
     va0 = PGROUNDDOWN(dstva);
     if (va0 >= MAXVA) return -1;
+    if (handleCOW(pagetable, va0) != 0) {
+      return -1;
+    }
     pte = walk(pagetable, va0, 0);
     if (pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
         (*pte & PTE_W) == 0)
@@ -377,4 +430,26 @@ int copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max) {
   } else {
     return -1;
   }
+}
+
+void vmprint_impl(pagetable_t pagetable, int level) {
+  if (level > 3) return;
+  for (int i = 0; i < 512; ++i) {
+    pte_t pte = pagetable[i];
+    if (pte & PTE_V) {
+      for (int j = 0; j < level; ++j) {
+        printf(" ..");
+      }
+      printf("%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
+    }
+    pagetable_t child = (pagetable_t)PTE2PA(pte);
+    if (child) {
+      vmprint_impl(child, level + 1);
+    }
+  }
+}
+
+void vmprint(pagetable_t pagetable) {
+  printf("page table %p\n", pagetable);
+  vmprint_impl(pagetable, 0);
 }
