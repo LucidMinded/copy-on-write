@@ -91,11 +91,11 @@ int handleCOW(pagetable_t pagetable, uint64 va) {
 
   uint64 pa = PTE2PA(*pte);
 
-  if (get_ref_cnt(pa) == 1) {
-    *pte |= PTE_W;
-    *pte &= ~PTE_COW;
-    return 0;
-  }
+  //   if (get_ref_cnt(pa) == 1) {
+  //     *pte |= PTE_W;
+  //     *pte &= ~PTE_COW;
+  //     return 0;
+  //   }
 
   uint64 flags = PTE_FLAGS(*pte);
   flags |= PTE_W;
@@ -106,12 +106,12 @@ int handleCOW(pagetable_t pagetable, uint64 va) {
   }
 
   memmove(mem, (char *)pa, PGSIZE);
-  uvmunmap(pagetable, va, 1, 1);
+  uvmunmap(pagetable, va, 1, 0);
   if (mappages(pagetable, va, PGSIZE, (uint64)mem, flags) != 0) {
     kfree(mem);
     return -1;
   }
-  //   kfree((void *)pa);
+  kfree((void *)pa);
   return 0;
 }
 
