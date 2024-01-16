@@ -78,14 +78,14 @@ int handleCOW(pagetable_t pagetable, uint64 va) {
   }
   pte_t *pte = walk(pagetable, va, 0);
   if (pte == 0) {
-    printf("usertrap(): walk() returns 0\n");
+    // printf("usertrap(): walk() returns 0\n");
     return -1;
   }
   if ((*pte & PTE_W)) {
     return 0;
   }
   if ((*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 || (*pte & PTE_COW) == 0) {
-    printf("usertrap(): pte not valid or access denied\n");
+    // printf("usertrap(): pte not valid or access denied\n");
     return -1;
   }
 
